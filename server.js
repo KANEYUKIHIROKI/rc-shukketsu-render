@@ -1,110 +1,150 @@
-/**
- * ============================================================
- * RC出欠管理 - Render公開用の最初のサーバー
- * ------------------------------------------------------------
- * 【このファイルの目的】
- * 1. Render上で Node.js のWebサーバーを起動する
- * 2. ブラウザで開いた時に「動作中」と分かる表示を返す
- * 3. LINE から POST が来た時に、まずは 200 OK を返せる形にする
- *
- * 【今の段階でまだしていないこと】
- * - LINE署名の検証
- * - 出席 / 欠席 / 保留 の判定
- * - Googleスプレッドシートへの書き込み
- *
- * 【今この段階で大事なこと】
- * - Render に正しくデプロイできること
- * - 公開URLにアクセスできること
- * - LINE の Webhook 検証に通る土台を作ること
- * ============================================================
- */
-
-// ------------------------------
-// Express を読み込む
-// ------------------------------
-// Express は Node.js でWebサーバーを簡単に作るための部品です。
-// package.json に書いた dependencies の "express" をここで使います。
 const express = require("express");
+const https = require("https");
 
-// ------------------------------
-// アプリ本体を作る
-// ------------------------------
-// app という名前でサーバーの本体を用意します。
 const app = express();
+const PORT = process.env.PORT || 10000;
 
-// ------------------------------
-// ポート番号を決める
-// ------------------------------
-// Render では process.env.PORT に自動で番号が入ります。
-// ローカルで試す時のために、入っていなければ 3000 を使います。
-const PORT = process.env.PORT || 3000;
+/**
+ * Apps Script の WebアプリURL
+ * ここに Render から転送します
+ */
+const APPS_SCRIPT_WEB_APP_URL =
+  "https://script.google.com/macros/s/AKfycbymuVEV4Gd-j6Gbk9c4xlVW5-gMpx83a-NGn83IJMRKOeEDCtzZ23NqsHSQrmLQqByc/exec";
 
-// ------------------------------
-// JSON形式の受信を使えるようにする
-// ------------------------------
-// LINE から POST されるデータは JSON 形式です。
-// その本文を app 側で読めるようにしておきます。
-app.use(express.json());
+/**
+ * JSON を POST 送信する共通関数
+ */
+function postJson(urlString, data) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(urlString);
+    const body = JSON.stringify(data);
 
-// ============================================================
-// GET /
-// ブラウザで開いた時の確認用
-// ============================================================
-// 例:
-//   https://xxxxx.onrender.com/
-// を開いた時に、このメッセージが返ります。
-// 「サーバーが動いているか」を見るための入口です。
+    const options = {
+      hostname: url.hostname,
+      path: url.pathname + url.search,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let responseBody = "";
+
+      res.on("data", (chunk) => {
+        responseBody += chunk;
+      });
+
+      res.on("end", () => {
+        resolve({
+          statusCode: res.statusCode,
+          body: responseBody
+        });
+      });
+    });
+
+    req.on("error", (error) => {
+      reject(error);
+    });
+
+    req.write(body);
+    req.end();
+  });
+}
+
+/**
+ * Render 側の動作確認用
+ */
 app.get("/", (req, res) => {
   res.status(200).send("RC出欠管理 Renderサーバー稼働中");
 });
 
-// ============================================================
-// POST /
-// LINE Webhook の最初の受信口
-// ============================================================
-// 今はまだ、受け取った内容を記録するだけです。
-// 最重要ポイントは「HTTP 200 を返すこと」です。
-// LINE の検証では、200 が返らないと失敗になります。
-app.post("/", (req, res) => {
+/**
+ * LINE Webhook を受け取る入口
+ */
+app.post("/", async (req, res) => {
   try {
-    // ----------------------------------------
-    // 受信した本文をサーバーログに出す
-    // ----------------------------------------
-    // 後から Render のログで確認できるようにしています。
     console.log("===== LINE Webhook受信 =====");
     console.log(JSON.stringify(req.body, null, 2));
 
-    // ----------------------------------------
-    // 今は必ず 200 OK を返す
-    // ----------------------------------------
-    // まだ中身の処理はしません。
-    // まずは「受け取れている」「検証に通る」ことを優先します。
-    res.status(200).json({
-      status: "ok",
-      message: "Webhook received"
+    const events = Array.isArray(req.body.events) ? req.body.events : [];
+
+    /**
+     * 検証時など、events が空でも 200 を返す
+     */
+    if (events.length === 0) {
+      return res.status(200).json({
+        status: "ok",
+        message: "no events"
+      });
+    }
+
+    /**
+     * 受け取った events を順に処理する
+     */
+    for (const event of events) {
+      /**
+       * テキストメッセージ以外は無視
+       */
+      if (event.type !== "message") continue;
+      if (!event.message) continue;
+      if (event.message.type !== "text") continue;
+
+      /**
+       * 個人ユーザー以外は今は対象外
+       */
+      if (!event.source) continue;
+      if (event.source.type !== "user") continue;
+
+      const lineUserId = String(event.source.userId || "").trim();
+      const text = String(event.message.text || "").trim();
+
+      if (!lineUserId) continue;
+      if (!text) continue;
+
+      /**
+       * Apps Script に渡すデータ
+       */
+      const payload = {
+        lineUserId: lineUserId,
+        text: text
+      };
+
+      console.log("===== Apps Script 送信 =====");
+      console.log(JSON.stringify(payload, null, 2));
+
+      const result = await postJson(APPS_SCRIPT_WEB_APP_URL, payload);
+
+      console.log("===== Apps Script 応答 =====");
+      console.log("statusCode:", result.statusCode);
+      console.log("body:", result.body);
+    }
+
+    /**
+     * LINE には必ず 200 を返す
+     */
+    return res.status(200).json({
+      status: "ok"
     });
+
   } catch (error) {
-    // ----------------------------------------
-    // エラーが起きても内容をログへ出す
-    // ----------------------------------------
     console.error("Webhook処理エラー:", error);
 
-    // ----------------------------------------
-    // いったん 500 を返す
-    // ----------------------------------------
-    // 本番ではもっと細かく制御しますが、
-    // 今は「問題が起きたこと」が分かれば十分です。
-    res.status(500).json({
-      status: "error",
-      message: error.message
+    /**
+     * エラー時でも LINE 側には 200 を返す
+     * 再送地獄を避けるため
+     */
+    return res.status(200).json({
+      status: "ok",
+      message: "error handled"
     });
   }
 });
 
-// ============================================================
-// サーバーを起動する
-// ============================================================
-// Render がこの Node.js アプリを起動すると、ここが実行されます。
+/**
+ * Render 上でサーバー起動
+ */
 app.listen(PORT, () => {
   console.log(`RC出欠管理サーバー起動: port=${PORT}`);
 });
