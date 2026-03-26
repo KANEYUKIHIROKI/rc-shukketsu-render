@@ -42,33 +42,43 @@ function postJson(urlString, data, redirectCount = 0) {
         responseBody += chunk;
       });
 
-      res.on("end", async () => {
-        const redirectStatusList = [301, 302, 303, 307, 308];
-        const location = res.headers.location;
+if (redirectStatusList.includes(res.statusCode) && location) {
+  try {
+    const nextUrl = new URL(location, urlString).toString();
 
-        if (redirectStatusList.includes(res.statusCode) && location) {
-          try {
-            const nextUrl = new URL(location, urlString).toString();
+    console.log("===== リダイレクト検出 =====");
+    console.log("元URL:", urlString);
+    console.log("転送先URL:", nextUrl);
+    console.log("statusCode:", res.statusCode);
 
-            console.log("===== リダイレクト検出 =====");
-            console.log("元URL:", urlString);
-            console.log("転送先URL:", nextUrl);
-            console.log("statusCode:", res.statusCode);
+    https.get(nextUrl, (redirectRes) => {
+      let redirectBody = "";
 
-            const redirectedResult = await postJson(
-              nextUrl,
-              data,
-              redirectCount + 1
-            );
+      redirectRes.on("data", (chunk) => {
+        redirectBody += chunk;
+      });
 
-            resolve(redirectedResult);
-            return;
-          } catch (error) {
-            reject(error);
-            return;
-          }
-        }
+      redirectRes.on("end", () => {
+        resolve({
+          statusCode: redirectRes.statusCode,
+          body: redirectBody
+        });
+      });
+    }).on("error", (error) => {
+      reject(error);
+    });
 
+    return;
+  } catch (error) {
+    reject(error);
+    return;
+  }
+}
+
+
+
+
+      
         resolve({
           statusCode: res.statusCode,
           body: responseBody
