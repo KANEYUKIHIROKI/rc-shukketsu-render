@@ -15,75 +15,25 @@ const APPS_SCRIPT_WEB_APP_URL =
 /**
  * JSON を POST 送信する共通関数
  */
-function postJson(urlString, data, redirectCount = 0) {
-  return new Promise((resolve, reject) => {
-    if (redirectCount > 5) {
-      reject(new Error("リダイレクト回数が多すぎます。"));
-      return;
-    }
+async function postJson(urlString, data) {
+  const response = await fetch(urlString, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(data),
+    redirect: "follow"
+  });
 
-    const url = new URL(urlString);
-    const body = JSON.stringify(data);
+  const body = await response.text();
 
-    const options = {
-      hostname: url.hostname,
-      path: url.pathname + url.search,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(body)
-      }
-    };
-
-    const req = https.request(options, (res) => {
-      let responseBody = "";
-
-      res.on("data", (chunk) => {
-        responseBody += chunk;
-      });
-
-if (redirectStatusList.includes(res.statusCode) && location) {
-  try {
-    const nextUrl = new URL(location, urlString).toString();
-
-    console.log("===== リダイレクト検出 =====");
-    console.log("元URL:", urlString);
-    console.log("転送先URL:", nextUrl);
-    console.log("statusCode:", res.statusCode);
-
-    https.get(nextUrl, (redirectRes) => {
-      let redirectBody = "";
-
-      redirectRes.on("data", (chunk) => {
-        redirectBody += chunk;
-      });
-
-      redirectRes.on("end", () => {
-        resolve({
-          statusCode: redirectRes.statusCode,
-          body: redirectBody
-        });
-      });
-    }).on("error", (error) => {
-      reject(error);
-    });
-
-    return;
-  } catch (error) {
-    reject(error);
-    return;
-  }
+  return {
+    statusCode: response.status,
+    body: body
+  };
 }
 
 
-
-
-      
-        resolve({
-          statusCode: res.statusCode,
-          body: responseBody
-        });
-      });
     });
 
     req.on("error", (error) => {
