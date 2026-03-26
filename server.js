@@ -34,15 +34,7 @@ async function postJson(urlString, data) {
 }
 
 
-}
 
-
-/**
- * Render 側の動作確認用
- */
-app.get("/", (req, res) => {
-  res.status(200).send("RC出欠管理 Renderサーバー稼働中");
-});
 
 /**
  * LINE Webhook を受け取る入口
