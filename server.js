@@ -34,15 +34,6 @@ async function postJson(urlString, data) {
 }
 
 
-    });
-
-    req.on("error", (error) => {
-      reject(error);
-    });
-
-    req.write(body);
-    req.end();
-  });
 }
 
 
