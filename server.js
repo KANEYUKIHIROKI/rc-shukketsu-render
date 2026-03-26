@@ -15,8 +15,13 @@ const APPS_SCRIPT_WEB_APP_URL =
 /**
  * JSON を POST 送信する共通関数
  */
-function postJson(urlString, data) {
+function postJson(urlString, data, redirectCount = 0) {
   return new Promise((resolve, reject) => {
+    if (redirectCount > 5) {
+      reject(new Error("リダイレクト回数が多すぎます。"));
+      return;
+    }
+
     const url = new URL(urlString);
     const body = JSON.stringify(data);
 
@@ -37,7 +42,33 @@ function postJson(urlString, data) {
         responseBody += chunk;
       });
 
-      res.on("end", () => {
+      res.on("end", async () => {
+        const redirectStatusList = [301, 302, 303, 307, 308];
+        const location = res.headers.location;
+
+        if (redirectStatusList.includes(res.statusCode) && location) {
+          try {
+            const nextUrl = new URL(location, urlString).toString();
+
+            console.log("===== リダイレクト検出 =====");
+            console.log("元URL:", urlString);
+            console.log("転送先URL:", nextUrl);
+            console.log("statusCode:", res.statusCode);
+
+            const redirectedResult = await postJson(
+              nextUrl,
+              data,
+              redirectCount + 1
+            );
+
+            resolve(redirectedResult);
+            return;
+          } catch (error) {
+            reject(error);
+            return;
+          }
+        }
+
         resolve({
           statusCode: res.statusCode,
           body: responseBody
@@ -53,6 +84,7 @@ function postJson(urlString, data) {
     req.end();
   });
 }
+
 
 /**
  * Render 側の動作確認用
